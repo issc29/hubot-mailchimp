@@ -9,20 +9,23 @@
 #   MAILCHIMP_LIST_ID
 #
 # Commands:
-#   hubot subscribe <email> - Add email to list
+#   hubot subscribe <email> <firstName> <lastName> <phone> - Add email to list
 #   hubot unsubscribe <email> - Remove email from list
 #   hubot mailchimp - Get statistics from latest mailing
 #
 # Author:
 #   max, lmarburger, m-baumgartner, sporkmonger, stephenyeargin
 
-MailChimpAPI = require('mailchimp').MailChimpAPI
+Mailchimp = require('mailchimp-api-v3')
+md5 = require('md5');
 
 apiKey = process.env.MAILCHIMP_API_KEY
 listId = process.env.MAILCHIMP_LIST_ID
 
+mailchimp = new Mailchimp(apiKey);
+
 module.exports = (robot) ->
-  robot.respond /\bsubscribe (.+@.+)/i, (message) ->
+  robot.respond /\bsubscribe (.+?) (.+?) (.+?) ([^ ]+)(.*)$/i, (message) ->
     subscribeToList message
   robot.respond /\bunsubscribe (.+@.+)/i, (message) ->
     unsubscribeFromList message
@@ -31,71 +34,66 @@ module.exports = (robot) ->
 
 subscribeToList = (message) ->
   emailAddress = message.match[1]
+  firstName = message.match[2]
+  lastName = message.match[3]
+  phoneNumber = message.match[4]
+
   message.reply "Attempting to subscribe #{emailAddress}..."
 
-  try
-    api = new MailChimpAPI(apiKey,
-      version: "1.3"
-      secure: false
-    )
-  catch error
-    console.log error.message
-    return
+  subscribe_list =
+    method : 'post'
+    path : "/lists/#{listId}/members"
+    body :
+      email_address : emailAddress
+      status : 'subscribed'
+      merge_fields :
+        FNAME : firstName
+        LNAME : lastName
+        PHONE : phoneNumber
 
-  api.listSubscribe
-    id:            listId
-    email_address: emailAddress
-    double_optin:  false
-  , (error, data) ->
-    if error
-      message.send "Uh oh, something went wrong: #{error.message}"
+  callback = (err, body) ->
+    if err
+      message.send "Uh oh, something went wrong: #{err}"
     else
       message.send "You successfully subscribed #{emailAddress}."
+
+  mailchimp.request(subscribe_list, callback)
 
 unsubscribeFromList = (message) ->
   emailAddress = message.match[1]
   message.reply "Attempting to unsubscribe #{emailAddress}..."
 
-  try
-    api = new MailChimpAPI(apiKey,
-      version: "1.3"
-      secure: false
-    )
-  catch error
-    console.log error.message
-    return
+  email_md5 = md5(emailAddress.toLowerCase());
 
-  api.listUnsubscribe
-    id:            listId
-    email_address: emailAddress
-    double_optin:  false
-  , (error, data) ->
-    if error
-      message.send "Uh oh, something went wrong: #{error.message}"
+  unsubscribe_list =
+    method : 'delete'
+    path : "/lists/#{listId}/members/#{email_md5}"
+
+  callback = (err, body) ->
+    if err
+      message.send "Uh oh, something went wrong: #{err}"
     else
       message.send "You successfully unsubscribed #{emailAddress}."
 
+  mailchimp.request(unsubscribe_list, callback)
+
 latestCampaign = (message) ->
+  get_list_info =
+    method : 'get'
+    path : '/lists/' + listId
 
-  try
-    api = new MailChimpAPI(apiKey,
-      version: "1.3"
-      secure: false
-    )
-  catch error
-    console.log error.message
-    return
+  callback = (err, body) ->
+    if err
+      message.send "Uh oh, something went wrong: #{err}"
 
-  api.campaigns { start: 0, limit: 1 }, (error, data) ->
-    if error
-      message.send "Uh oh, something went wrong: #{error.message}"
-    else
-      # Get the first campaign in the list
-      cid = data['data'][0]['id']
-      campaign_name = data['data'][0]['title']
+    cid = body['id']
+    campaign_name = body['name']
+    member_count = body['stats']['member_count']
+    campaign_last_sent = body['stats']['campaign_last_sent']
+    open_rate = body['stats']['open_rate']
+    click_rate = body['stats']['click_rate']
+    unsubscribe_count = body['stats']['unsubscribe_count']
+    #console.log(data);
+    message.send "Last campaign \"#{campaign_name}\" was sent to #{member_count} subscribers on #{campaign_last_sent} \n   Unique Opens Rate: #{open_rate}\n   Click Rate: #{click_rate}\n   Unsubscribed: #{unsubscribe_count}"
 
-      api.campaignStats { cid : cid }, (error, data) ->
-        if error
-          message.send "Uh oh, something went wrong: #{error.message}"
-        else
-          message.send "Last campaign \"#{campaign_name}\" was sent to #{data['emails_sent']} subscribers (#{data['unique_opens']} opened, #{data['unique_clicks']} clicked, #{data['unsubscribes']} unsubscribed)"
+  mailchimp.request(get_list_info, callback)

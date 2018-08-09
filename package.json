@@ -21,7 +21,8 @@
   },
   "dependencies": {
     "coffee-script": "~1.6",
-    "mailchimp": "1.1.0"
+    "mailchimp-api-v3": "1.12",
+    "md5": ">2.0.0"
   },
   "main": "index.coffee",
   "readme": "hubot-mailchimp\n===============\n\nMailchimp hubot script as an NPM package\n",
